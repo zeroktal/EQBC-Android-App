@@ -47,7 +47,6 @@ fun EQBCClientApp() {
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("EQBC_PREFS", Context.MODE_PRIVATE) }
     
-    // UI State
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
     var writer by remember { mutableStateOf<PrintWriter?>(null) }
@@ -55,25 +54,21 @@ fun EQBCClientApp() {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Persistent Hotkeys
     val initialHotkeys = remember {
         val saved = sharedPrefs.getString("HOTKEYS", "/bcaa //sit|/bcaa //stand|/bcaa //follow")
         saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("/bcaa //sit", "/bcaa //stand", "/bcaa //follow")
     }
     val hotkeys = initialHotkeys
 
-    // Hotkey Edit Dialog State
     var showEditDialog by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableIntStateOf(-1) }
     var tempHotkeyText by remember { mutableStateOf("") }
 
-    // Helpers
     fun saveHotkeys(list: List<String>) {
         sharedPrefs.edit().putString("HOTKEYS", list.joinToString("|")).apply()
     }
 
     fun connectToServer(ip: String, port: Int, name: String) {
-        // Save connection info for next time
         sharedPrefs.edit().apply {
             putString("LAST_IP", ip)
             putInt("LAST_PORT", port)
@@ -102,6 +97,18 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) { writer?.println(cmd) }
     }
 
+    // New Smart Send helper for row 1 buttons
+    fun smartSend(prefix: String) {
+        val finalCmd = if (inputText.isNotBlank()) {
+            val combined = "$prefix $inputText".trim()
+            inputText = "" // Clear the input box after sending
+            combined
+        } else {
+            prefix.trim()
+        }
+        send(finalCmd)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -110,10 +117,7 @@ fun EQBCClientApp() {
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu")
                     }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         DropdownMenuItem(
                             text = { Text("Connect to Last") },
                             onClick = {
@@ -121,19 +125,12 @@ fun EQBCClientApp() {
                                 val ip = sharedPrefs.getString("LAST_IP", "")
                                 val port = sharedPrefs.getInt("LAST_PORT", 2112)
                                 val name = sharedPrefs.getString("LAST_NAME", "")
-                                if (!ip.isNullOrEmpty() && !name.isNullOrEmpty()) {
-                                    connectToServer(ip, port, name)
-                                } else {
-                                    messages = messages + "No saved connection found."
-                                }
+                                if (!ip.isNullOrEmpty() && !name.isNullOrEmpty()) connectToServer(ip, port, name)
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Clear Output") },
-                            onClick = {
-                                menuExpanded = false
-                                messages = emptyList()
-                            }
+                            onClick = { menuExpanded = false; messages = emptyList() }
                         )
                     }
                 }
@@ -141,8 +138,6 @@ fun EQBCClientApp() {
         }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding).fillMaxSize().padding(8.dp).imePadding()) {
-            
-            // 1. Output Window
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 color = Color(0xFF1E1E1E),
@@ -157,21 +152,21 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 2. Static Buttons
+            // Row 1: Fixed Buttons (Now combines with Input Text)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("/bct ", "/bca ", "/bcaa ").forEach { label ->
+                listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
-                        onClick = { send(label) },
+                        onClick = { smartSend(label) },
                         modifier = Modifier.weight(1f).height(36.dp),
                         contentPadding = PaddingValues(0.dp),
                         shape = RoundedCornerShape(4.dp)
-                    ) { Text(label.trim(), fontSize = 12.sp) }
+                    ) { Text(label, fontSize = 12.sp) }
                 }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 3. Persistent Hotkeys
+            // Row 2: Configurable Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -195,14 +190,14 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 4. Input Area
+            // Row 3: Input Area
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.weight(1f),
                     textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
-                    placeholder = { Text("connect [IP] [PORT] [NAME]", fontSize = 12.sp) },
+                    placeholder = { Text("Command...", fontSize = 12.sp) },
                     singleLine = true
                 )
                 Spacer(modifier = Modifier.width(4.dp))
