@@ -32,8 +32,8 @@ android {
         compose true
     }
     composeOptions {
-        // This version MUST be 1.5.1 to work with Kotlin 1.9.0
-        kotlinCompilerExtensionVersion '1.5.1'
+        // 1.5.8 is the required version for Kotlin 1.9.22
+        kotlinCompilerExtensionVersion '1.5.8'
     }
 }
 
