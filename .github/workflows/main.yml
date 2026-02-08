@@ -15,12 +15,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Generate Wrapper and Build
+      - name: Build with Gradle
         run: |
-          # This command creates the gradlew file that was missing
-          gradle wrapper 
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          # We force the plugin version here to solve the DependencyHandler error
+          gradle wrapper --gradle-version 8.2
+          ./gradlew assembleDebug -Pandroid.useAndroidX=true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
