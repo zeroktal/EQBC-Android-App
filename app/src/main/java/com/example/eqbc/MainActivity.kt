@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.OutputStream
+import java.io.PrintWriter
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -49,13 +49,13 @@ fun EQBCClientApp() {
     
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
+    var writer by remember { mutableStateOf<PrintWriter?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var isConnected by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Persistent Hotkeys
+    // Load/Save Hotkeys
     val initialHotkeys = remember {
         val saved = sharedPrefs.getString("HOTKEYS", "/bcaa //sit|/bcaa //stand|/bcaa //follow")
         saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("/bcaa //sit", "/bcaa //stand", "/bcaa //follow")
@@ -65,10 +65,6 @@ fun EQBCClientApp() {
     var showEditDialog by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableIntStateOf(-1) }
     var tempHotkeyText by remember { mutableStateOf("") }
-
-    fun saveHotkeys(list: List<String>) {
-        sharedPrefs.edit().putString("HOTKEYS", list.joinToString("|")).apply()
-    }
 
     fun connectToServer(ip: String, port: Int, name: String) {
         sharedPrefs.edit().apply {
@@ -80,10 +76,10 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                outputStream = s.getOutputStream()
-                outputStream?.write("LOGIN=$name;\n".toByteArray())
-                outputStream?.flush()
-                
+                val out = PrintWriter(s.getOutputStream(), true)
+                writer = out
+                out.print("LOGIN=$name;\n")
+                out.flush()
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
@@ -97,30 +93,22 @@ fun EQBCClientApp() {
         }
     }
 
-    fun sendRaw(cmd: String, isProtocol: Boolean = false) {
+    fun send(cmd: String) {
         scope.launch(Dispatchers.IO) {
-            try {
-                if (isProtocol) outputStream?.write(9) // The Protocol TAB
-                outputStream?.write((cmd + "\n").toByteArray())
-                outputStream?.flush()
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { messages = messages + "Send Error" }
-            }
+            writer?.println(cmd)
+            writer?.flush()
         }
     }
 
-    fun smartSend(type: String) {
+    // Since manual typing worked, buttons will now just "type" for you.
+    fun smartSend(prefix: String) {
         if (inputText.isBlank()) {
-            inputText = "$type "
+            inputText = "$prefix "
             return
         }
-        val cleanInput = inputText.trim()
-        when (type) {
-            "/bct" -> sendRaw("TELL $cleanInput", isProtocol = true)
-            "/bca", "/bcaa" -> sendRaw("MSGALL $cleanInput", isProtocol = true)
-            else -> sendRaw(cleanInput, isProtocol = false)
-        }
-        inputText = "" 
+        val combined = "$prefix $inputText".trim()
+        send(combined)
+        inputText = ""
     }
 
     Scaffold(
@@ -134,7 +122,7 @@ fun EQBCClientApp() {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "Menu") }
+                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Menu") }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         DropdownMenuItem(
                             text = { Text("Connect to Last") },
@@ -156,7 +144,6 @@ fun EQBCClientApp() {
         }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding).fillMaxSize().padding(8.dp).imePadding()) {
-            // Output Window
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 color = Color(0xFF1E1E1E),
@@ -171,7 +158,6 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 1: Protocol Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -185,7 +171,6 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Saved Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -193,7 +178,7 @@ fun EQBCClientApp() {
                             .weight(1f).height(36.dp)
                             .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
                             .combinedClickable(
-                                onClick = { sendRaw(hk, isProtocol = hk.contains("TELL") || hk.contains("MSGALL")) },
+                                onClick = { send(hk) },
                                 onLongClick = {
                                     editingIndex = index
                                     tempHotkeyText = hk
@@ -209,13 +194,12 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 3: Input
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Command...", fontSize = 12.sp) },
+                    placeholder = { Text("zeros //stand", fontSize = 12.sp) },
                     singleLine = true
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -225,7 +209,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            sendRaw(inputText, isProtocol = false)
+                            send(inputText)
                         }
                         inputText = ""
                     },
@@ -245,7 +229,7 @@ fun EQBCClientApp() {
                 TextButton(onClick = {
                     if (editingIndex != -1) {
                         hotkeys[editingIndex] = tempHotkeyText
-                        saveHotkeys(hotkeys)
+                        sharedPrefs.edit().putString("HOTKEYS", hotkeys.joinToString("|")).apply()
                     }
                     showEditDialog = false
                 }) { Text("Save") }
