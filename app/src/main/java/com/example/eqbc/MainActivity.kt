@@ -51,6 +51,7 @@ fun EQBCClientApp() {
     var inputText by remember { mutableStateOf("") }
     var writer by remember { mutableStateOf<PrintWriter?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var isConnected by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -82,37 +83,62 @@ fun EQBCClientApp() {
                 writer = out
                 out.print("LOGIN=$name;\n")
                 out.flush()
+                isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
                     val line = reader.readLine() ?: break
                     withContext(Dispatchers.Main) { messages = messages + line }
                 }
             } catch (e: Exception) {
+                isConnected = false
                 withContext(Dispatchers.Main) { messages = messages + "Error: ${e.message}" }
             }
         }
     }
 
-    fun send(cmd: String) {
-        scope.launch(Dispatchers.IO) { writer?.println(cmd) }
+    // Sends a raw string to the server with proper newline
+    fun sendRaw(cmd: String) {
+        scope.launch(Dispatchers.IO) {
+            writer?.print("$cmd\n")
+            writer?.flush()
+        }
     }
 
-    // New Smart Send helper for row 1 buttons
-    fun smartSend(prefix: String) {
-        val finalCmd = if (inputText.isNotBlank()) {
-            val combined = "$prefix $inputText".trim()
-            inputText = "" // Clear the input box after sending
-            combined
-        } else {
-            prefix.trim()
+    // Formats commands according to MQ2EQBC Protocol
+    fun smartSend(type: String) {
+        if (inputText.isBlank()) return
+        
+        val finalPacket = when (type) {
+            "/bct" -> {
+                // Protocol: [TAB]TELL [Name] [Command][NEWLINE]
+                "\tTELL $inputText"
+            }
+            "/bca" -> {
+                // Protocol: [TAB]MSGALL [Command][NEWLINE] (Excludes self)
+                "\tMSGALL $inputText"
+            }
+            "/bcaa" -> {
+                // Protocol: [TAB]MSGALL [Command][NEWLINE] (Includes self)
+                // Note: The server handles 'bcaa' logic via MSGALL typically
+                "\tMSGALL $inputText"
+            }
+            else -> inputText
         }
-        send(finalCmd)
+        
+        sendRaw(finalPacket)
+        inputText = ""
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("EQBC Mobile", fontSize = 18.sp) },
+                title = { 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("EQBC Mobile", fontSize = 18.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(10.dp).background(if(isConnected) Color.Green else Color.Red, RoundedCornerShape(5.dp)))
+                    }
+                },
                 actions = {
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu")
@@ -152,7 +178,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 1: Fixed Buttons (Now combines with Input Text)
+            // Row 1: Protocol Command Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -166,7 +192,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Configurable Hotkeys
+            // Row 2: Configurable Hotkeys (Sends raw, so put protocol here if needed)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -174,7 +200,7 @@ fun EQBCClientApp() {
                             .weight(1f).height(36.dp)
                             .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
                             .combinedClickable(
-                                onClick = { send(hk) },
+                                onClick = { sendRaw(hk) },
                                 onLongClick = {
                                     editingIndex = index
                                     tempHotkeyText = hk
@@ -207,7 +233,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            send(inputText)
+                            sendRaw(inputText)
                         }
                         inputText = ""
                     },
