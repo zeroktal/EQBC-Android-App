@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.OutputStream
+import java.io.PrintWriter
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -49,7 +49,7 @@ fun EQBCClientApp() {
     
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
+    var writer by remember { mutableStateOf<PrintWriter?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var isConnected by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -79,13 +79,10 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                outputStream = s.getOutputStream()
-                
-                // Handshake: LOGIN=Name;
-                val handshake = "LOGIN=$name;\n"
-                outputStream?.write(handshake.toByteArray())
-                outputStream?.flush()
-                
+                val out = PrintWriter(s.getOutputStream(), true)
+                writer = out
+                out.print("LOGIN=$name;\n")
+                out.flush()
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
@@ -99,35 +96,30 @@ fun EQBCClientApp() {
         }
     }
 
-    // Sends raw bytes to handle the Protocol Tab (0x09) correctly
-    fun sendCommand(cmd: String, isProtocol: Boolean = false) {
+    fun send(cmd: String) {
         scope.launch(Dispatchers.IO) {
-            try {
-                if (isProtocol) {
-                    outputStream?.write(9) // ASCII Tab character
-                }
-                outputStream?.write((cmd + "\n").toByteArray())
-                outputStream?.flush()
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { messages = messages + "Send Error: ${e.message}" }
-            }
+            writer?.println(cmd)
+            writer?.flush()
         }
     }
 
+    // This converts the UI buttons into the "Raw Protocol" the server wants
     fun smartSend(type: String) {
         if (inputText.isBlank()) {
             inputText = "$type "
             return
         }
-
+        
         val cleanInput = inputText.trim()
-        when (type) {
-            "/bct" -> sendCommand("TELL $cleanInput", isProtocol = true)
-            "/bca" -> sendCommand("MSGALL $cleanInput", isProtocol = true)
-            "/bcaa" -> sendCommand("MSGALL $cleanInput", isProtocol = true)
-            else -> sendCommand(cleanInput, isProtocol = false)
+        val finalCmd = when (type) {
+            "/bct" -> "bct $cleanInput" // No leading slash
+            "/bca" -> "bca $cleanInput"
+            "/bcaa" -> "bcaa $cleanInput"
+            else -> cleanInput
         }
-        inputText = "" 
+        
+        send(finalCmd)
+        inputText = ""
     }
 
     Scaffold(
@@ -179,6 +171,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 1: Fixed Buttons (Protocol Tokens)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -192,6 +185,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 2: Configurable Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -199,7 +193,7 @@ fun EQBCClientApp() {
                             .weight(1f).height(36.dp)
                             .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
                             .combinedClickable(
-                                onClick = { sendCommand(hk, isProtocol = false) },
+                                onClick = { send(hk) },
                                 onLongClick = {
                                     editingIndex = index
                                     tempHotkeyText = hk
@@ -215,6 +209,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 3: Input Area
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = inputText,
@@ -231,7 +226,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            sendCommand(inputText, isProtocol = false)
+                            send(inputText)
                         }
                         inputText = ""
                     },
