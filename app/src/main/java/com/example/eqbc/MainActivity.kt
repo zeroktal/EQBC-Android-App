@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.PrintWriter
+import java.io.OutputStream
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -49,14 +49,14 @@ fun EQBCClientApp() {
     
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var writer by remember { mutableStateOf<PrintWriter?>(null) }
+    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
     var isConnected by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Prepopulated Hotkeys per request
+    // Prepopulated Hotkeys
     val hotkeys = remember {
         val saved = sharedPrefs.getString("HOTKEYS", "connect 192.168.1.3 2112 bob|/bca //stand|/bcaa //follow")
         saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("connect 192.168.1.3 2112 bob", "/bca //stand", "/bcaa //follow")
@@ -76,32 +76,35 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                val out = PrintWriter(s.getOutputStream(), true)
-                writer = out
-                out.print("LOGIN=$name;\n")
-                out.flush()
+                outputStream = s.getOutputStream()
+                // Handshake
+                outputStream?.write("LOGIN=$name;\n".toByteArray())
+                outputStream?.flush()
                 
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
                     val line = reader.readLine() ?: break
-                    withContext(Dispatchers.Main) {
-                        messages = messages + line
-                    }
+                    withContext(Dispatchers.Main) { messages = messages + line }
                 }
             } catch (e: Exception) {
                 isConnected = false
-                withContext(Dispatchers.Main) {
-                    messages = messages + "Error: ${e.message}"
-                }
+                withContext(Dispatchers.Main) { messages = messages + "Error: ${e.message}" }
             }
         }
     }
 
-    fun sendRaw(text: String) {
+    // This is the core protocol function
+    fun sendPacket(text: String, isCommand: Boolean) {
         scope.launch(Dispatchers.IO) {
-            writer?.println(text)
-            writer?.flush()
+            try {
+                if (isCommand) {
+                    // Protocol requires leading TAB (ASCII 9) to trigger CMD logic
+                    outputStream?.write(9) 
+                }
+                outputStream?.write((text + "\n").toByteArray())
+                outputStream?.flush()
+            } catch (e: Exception) { }
         }
     }
 
@@ -110,8 +113,12 @@ fun EQBCClientApp() {
             inputText = "$prefix "
             return
         }
-        val combined = "$prefix ${inputText.trim()}"
-        sendRaw(combined)
+        val cleanInput = inputText.trim()
+        when (prefix) {
+            "/bct" -> sendPacket("TELL $cleanInput", true)
+            "/bca", "/bcaa" -> sendPacket("MSGALL $cleanInput", true)
+            else -> sendPacket(cleanInput, false)
+        }
         inputText = ""
     }
 
@@ -178,7 +185,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Grey Hotkeys (Prepopulated)
+            // Row 2: Prepopulated Grey Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -190,8 +197,15 @@ fun EQBCClientApp() {
                                     if (hk.startsWith("connect")) {
                                         val p = hk.split(" ")
                                         if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
+                                    } else if (hk.contains("/bc")) {
+                                        // Auto-format hotkey to protocol
+                                        val cmd = hk.replace("/bct ", "TELL ")
+                                                   .replace("/bca ", "MSGALL ")
+                                                   .replace("/bcaa ", "MSGALL ")
+                                                   .removePrefix("/")
+                                        sendPacket(cmd, true)
                                     } else {
-                                        sendRaw(hk)
+                                        sendPacket(hk, false)
                                     }
                                 },
                                 onLongClick = {
@@ -224,7 +238,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            sendRaw(inputText)
+                            sendPacket(inputText, false)
                         }
                         inputText = ""
                     },
