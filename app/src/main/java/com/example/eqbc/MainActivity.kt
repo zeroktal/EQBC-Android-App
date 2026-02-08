@@ -96,37 +96,25 @@ fun EQBCClientApp() {
         }
     }
 
-    // Sends a raw string to the server with proper newline
     fun sendRaw(cmd: String) {
         scope.launch(Dispatchers.IO) {
-            writer?.print("$cmd\n")
+            writer?.println(cmd)
             writer?.flush()
         }
     }
 
-    // Formats commands according to MQ2EQBC Protocol
-    fun smartSend(type: String) {
-        if (inputText.isBlank()) return
-        
-        val finalPacket = when (type) {
-            "/bct" -> {
-                // Protocol: [TAB]TELL [Name] [Command][NEWLINE]
-                "\tTELL $inputText"
-            }
-            "/bca" -> {
-                // Protocol: [TAB]MSGALL [Command][NEWLINE] (Excludes self)
-                "\tMSGALL $inputText"
-            }
-            "/bcaa" -> {
-                // Protocol: [TAB]MSGALL [Command][NEWLINE] (Includes self)
-                // Note: The server handles 'bcaa' logic via MSGALL typically
-                "\tMSGALL $inputText"
-            }
-            else -> inputText
+    // Fixed smartSend: Uses standard slashes and space separation
+    fun smartSend(prefix: String) {
+        if (inputText.isBlank()) {
+            // If box is empty, just put the command in the box for the user
+            inputText = "$prefix "
+            return
         }
         
-        sendRaw(finalPacket)
-        inputText = ""
+        // If box has text, combine and send immediately
+        val combined = "$prefix $inputText".trim()
+        sendRaw(combined)
+        inputText = "" 
     }
 
     Scaffold(
@@ -178,7 +166,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 1: Protocol Command Buttons
+            // Row 1: Fixed Buttons (Uses standard slash commands)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -192,7 +180,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Configurable Hotkeys (Sends raw, so put protocol here if needed)
+            // Row 2: Configurable Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
