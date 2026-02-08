@@ -21,7 +21,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                EQBCClientApp()
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    EQBCClientApp()
+                }
             }
         }
     }
@@ -31,17 +33,14 @@ class MainActivity : ComponentActivity() {
 fun EQBCClientApp() {
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var socket: Socket? by remember { mutableStateOf(null) }
-    var writer: PrintWriter? by remember { mutableStateOf(null) }
+    var writer by remember { mutableStateOf<PrintWriter?>(null) }
     val scope = rememberCoroutineScope()
-
     val hotkeys = remember { mutableStateListOf("/bct MyHealer //cast 1", "/bcaa //sit", "/bcaa //stand") }
 
     fun connectToServer(ip: String, port: Int, name: String) {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                socket = s
                 val out = PrintWriter(s.getOutputStream(), true)
                 writer = out
                 out.print("LOGIN=$name;\n")
@@ -62,7 +61,7 @@ fun EQBCClientApp() {
         }
     }
 
-    fun sendCommand(cmd: String) {
+    fun send(cmd: String) {
         scope.launch(Dispatchers.IO) {
             writer?.println(cmd)
         }
@@ -85,15 +84,15 @@ fun EQBCClientApp() {
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Button(onClick = { sendCommand("/bct ") }) { Text("/bct") }
-            Button(onClick = { sendCommand("/bca ") }) { Text("/bca") }
-            Button(onClick = { sendCommand("/bcaa ") }) { Text("/bcaa") }
+            Button(onClick = { send("/bct ") }) { Text("/bct") }
+            Button(onClick = { send("/bca ") }) { Text("/bca") }
+            Button(onClick = { send("/bcaa ") }) { Text("/bcaa") }
         }
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             hotkeys.forEach { hk ->
-                Button(onClick = { sendCommand(hk) }) {
-                    Text(hk.take(5) + "...") 
+                Button(onClick = { send(hk) }) {
+                    Text(hk.take(5)) 
                 }
             }
         }
@@ -105,16 +104,14 @@ fun EQBCClientApp() {
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Enter command...") }
+                placeholder = { Text("connect [IP] [PORT] [NAME]") }
             )
-            IconButton(onClick = {
+            Button(onClick = {
                 if (inputText.startsWith("connect")) {
-                    val parts = inputText.split(" ")
-                    if (parts.size >= 4) {
-                        connectToServer(parts[1], parts[2].toInt(), parts[3])
-                    }
+                    val p = inputText.split(" ")
+                    if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                 } else {
-                    sendCommand(inputText)
+                    send(inputText)
                 }
                 inputText = ""
             }) {
