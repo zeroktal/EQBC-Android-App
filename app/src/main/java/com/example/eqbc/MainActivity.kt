@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.PrintWriter
+import java.io.OutputStream
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -49,7 +49,7 @@ fun EQBCClientApp() {
     
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var writer by remember { mutableStateOf<PrintWriter?>(null) }
+    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var isConnected by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -79,10 +79,13 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                val out = PrintWriter(s.getOutputStream(), true)
-                writer = out
-                out.print("LOGIN=$name;\n")
-                out.flush()
+                outputStream = s.getOutputStream()
+                
+                // Handshake: LOGIN=Name;
+                val handshake = "LOGIN=$name;\n"
+                outputStream?.write(handshake.toByteArray())
+                outputStream?.flush()
+                
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
@@ -96,38 +99,34 @@ fun EQBCClientApp() {
         }
     }
 
-    fun sendRaw(cmd: String) {
+    // Sends raw bytes to handle the Protocol Tab (0x09) correctly
+    fun sendCommand(cmd: String, isProtocol: Boolean = false) {
         scope.launch(Dispatchers.IO) {
-            writer?.println(cmd)
-            writer?.flush()
+            try {
+                if (isProtocol) {
+                    outputStream?.write(9) // ASCII Tab character
+                }
+                outputStream?.write((cmd + "\n").toByteArray())
+                outputStream?.flush()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { messages = messages + "Send Error: ${e.message}" }
+            }
         }
     }
 
-    // Fixed smartSend: Uses standard slashes and space separation
-fun smartSend(type: String) {
+    fun smartSend(type: String) {
         if (inputText.isBlank()) {
             inputText = "$type "
             return
         }
-        
-        // We trim and split the input to separate the Target Name from the Command
-        val parts = inputText.trim().split(" ", limit = 2)
-        
-        val finalPacket = when (type) {
-            "/bct" -> {
-                // If the user typed "ToonName //command"
-                if (parts.size == 2) {
-                    "\tTELL ${parts[0]} ${parts[1]}"
-                } else {
-                    "\tTELL $inputText"
-                }
-            }
-            "/bca" -> "\tMSGALL $inputText"
-            "/bcaa" -> "\tMSGALL $inputText" // Server handles 'all' via MSGALL
-            else -> inputText
+
+        val cleanInput = inputText.trim()
+        when (type) {
+            "/bct" -> sendCommand("TELL $cleanInput", isProtocol = true)
+            "/bca" -> sendCommand("MSGALL $cleanInput", isProtocol = true)
+            "/bcaa" -> sendCommand("MSGALL $cleanInput", isProtocol = true)
+            else -> sendCommand(cleanInput, isProtocol = false)
         }
-        
-        sendRaw(finalPacket)
         inputText = "" 
     }
 
@@ -180,7 +179,6 @@ fun smartSend(type: String) {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 1: Fixed Buttons (Uses standard slash commands)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -194,7 +192,6 @@ fun smartSend(type: String) {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Configurable Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -202,7 +199,7 @@ fun smartSend(type: String) {
                             .weight(1f).height(36.dp)
                             .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
                             .combinedClickable(
-                                onClick = { sendRaw(hk) },
+                                onClick = { sendCommand(hk, isProtocol = false) },
                                 onLongClick = {
                                     editingIndex = index
                                     tempHotkeyText = hk
@@ -218,7 +215,6 @@ fun smartSend(type: String) {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 3: Input Area
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = inputText,
@@ -235,7 +231,7 @@ fun smartSend(type: String) {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            sendRaw(inputText)
+                            sendCommand(inputText, isProtocol = false)
                         }
                         inputText = ""
                     },
