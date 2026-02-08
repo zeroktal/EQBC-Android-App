@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.PrintWriter
+import java.io.OutputStream
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -47,25 +47,29 @@ fun EQBCClientApp() {
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("EQBC_PREFS", Context.MODE_PRIVATE) }
     
+    // State variables
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var writer by remember { mutableStateOf<PrintWriter?>(null) }
-    var menuExpanded by remember { mutableStateOf(false) }
+    var socket by remember { mutableStateOf<Socket?>(null) }
+    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
     var isConnected by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Load/Save Hotkeys
-    val initialHotkeys = remember {
+    // Persistent Hotkeys
+    val hotkeys = remember {
         val saved = sharedPrefs.getString("HOTKEYS", "/bcaa //sit|/bcaa //stand|/bcaa //follow")
         saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("/bcaa //sit", "/bcaa //stand", "/bcaa //follow")
     }
-    val hotkeys = initialHotkeys
 
+    // Dialog state for editing hotkeys
     var showEditDialog by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableIntStateOf(-1) }
     var tempHotkeyText by remember { mutableStateOf("") }
 
+    // Logic: Connect to Server
     fun connectToServer(ip: String, port: Int, name: String) {
         sharedPrefs.edit().apply {
             putString("LAST_IP", ip)
@@ -76,38 +80,64 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                val out = PrintWriter(s.getOutputStream(), true)
-                writer = out
-                out.print("LOGIN=$name;\n")
-                out.flush()
+                socket = s
+                outputStream = s.getOutputStream()
+                
+                // Handshake
+                outputStream?.write("LOGIN=$name;\n".toByteArray())
+                outputStream?.flush()
+                
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
                 while (isActive) {
                     val line = reader.readLine() ?: break
-                    withContext(Dispatchers.Main) { messages = messages + line }
+                    withContext(Dispatchers.Main) {
+                        messages = messages + line
+                    }
                 }
             } catch (e: Exception) {
                 isConnected = false
-                withContext(Dispatchers.Main) { messages = messages + "Error: ${e.message}" }
+                withContext(Dispatchers.Main) {
+                    messages = messages + "Error: ${e.message}"
+                }
             }
         }
     }
 
-    fun send(cmd: String) {
+    // Logic: Send Plain Text (Chat)
+    fun sendChat(text: String) {
         scope.launch(Dispatchers.IO) {
-            writer?.println(cmd)
-            writer?.flush()
+            try {
+                outputStream?.write((text + "\n").toByteArray())
+                outputStream?.flush()
+            } catch (e: Exception) { /* Handle error */ }
         }
     }
 
-    // Since manual typing worked, buttons will now just "type" for you.
+    // Logic: Send Protocol Command (Commands)
+    // This sends ASCII 9 (Tab) to tell the server this is a Command, not Chat
+    fun sendProtocolCommand(command: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                outputStream?.write(9) // TAB
+                outputStream?.write((command + "\n").toByteArray())
+                outputStream?.flush()
+            } catch (e: Exception) { /* Handle error */ }
+        }
+    }
+
+    // Logic: Process Button Clicks
     fun smartSend(prefix: String) {
         if (inputText.isBlank()) {
             inputText = "$prefix "
             return
         }
-        val combined = "$prefix $inputText".trim()
-        send(combined)
+        val cleanInput = inputText.trim()
+        when (prefix) {
+            "/bct" -> sendProtocolCommand("TELL $cleanInput")
+            "/bca", "/bcaa" -> sendProtocolCommand("MSGALL $cleanInput")
+            else -> sendChat(cleanInput)
+        }
         inputText = ""
     }
 
@@ -122,7 +152,9 @@ fun EQBCClientApp() {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Menu") }
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                         DropdownMenuItem(
                             text = { Text("Connect to Last") },
@@ -130,13 +162,16 @@ fun EQBCClientApp() {
                                 menuExpanded = false
                                 val ip = sharedPrefs.getString("LAST_IP", "")
                                 val port = sharedPrefs.getInt("LAST_PORT", 2112)
-                                val name = sharedPrefs.getString("LAST_NAME", "")
-                                if (!ip.isNullOrEmpty() && !name.isNullOrEmpty()) connectToServer(ip, port, name)
+                                val name = sharedPrefs.getString("LAST_NAME", "bob")
+                                if (!ip.isNullOrEmpty()) connectToServer(ip, port, name)
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Clear Output") },
-                            onClick = { menuExpanded = false; messages = emptyList() }
+                            onClick = { 
+                                menuExpanded = false
+                                messages = emptyList() 
+                            }
                         )
                     }
                 }
@@ -144,6 +179,8 @@ fun EQBCClientApp() {
         }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding).fillMaxSize().padding(8.dp).imePadding()) {
+            
+            // Output Window
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 color = Color(0xFF1E1E1E),
@@ -158,6 +195,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 1: Protocol Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -171,6 +209,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 2: Saved Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -178,7 +217,15 @@ fun EQBCClientApp() {
                             .weight(1f).height(36.dp)
                             .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
                             .combinedClickable(
-                                onClick = { send(hk) },
+                                onClick = { 
+                                    // If hotkey looks like a command, send it as protocol
+                                    if (hk.startsWith("/bc")) {
+                                        val cmd = hk.replace("/bct ", "TELL ").replace("/bca ", "MSGALL ").replace("/bcaa ", "MSGALL ")
+                                        sendProtocolCommand(cmd.removePrefix("/")) 
+                                    } else {
+                                        sendChat(hk)
+                                    }
+                                },
                                 onLongClick = {
                                     editingIndex = index
                                     tempHotkeyText = hk
@@ -194,12 +241,13 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Input Area
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("zeros //stand", fontSize = 12.sp) },
+                    placeholder = { Text("Command...", fontSize = 12.sp) },
                     singleLine = true
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -209,7 +257,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            send(inputText)
+                            sendChat(inputText)
                         }
                         inputText = ""
                     },
@@ -220,6 +268,7 @@ fun EQBCClientApp() {
         }
     }
 
+    // Edit Hotkey Dialog
     if (showEditDialog) {
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
@@ -237,6 +286,7 @@ fun EQBCClientApp() {
         )
     }
 
+    // Auto-scroll logic
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
