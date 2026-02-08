@@ -56,7 +56,6 @@ fun EQBCClientApp() {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Prepopulated Hotkeys
     val hotkeys = remember {
         val saved = sharedPrefs.getString("HOTKEYS", "connect 192.168.1.3 2112 bob|/bca //stand|/bcaa //follow")
         saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("connect 192.168.1.3 2112 bob", "/bca //stand", "/bcaa //follow")
@@ -77,7 +76,6 @@ fun EQBCClientApp() {
             try {
                 val s = Socket(ip, port)
                 outputStream = s.getOutputStream()
-                // Handshake
                 outputStream?.write("LOGIN=$name;\n".toByteArray())
                 outputStream?.flush()
                 
@@ -94,13 +92,11 @@ fun EQBCClientApp() {
         }
     }
 
-    // This is the core protocol function
     fun sendPacket(text: String, isCommand: Boolean) {
         scope.launch(Dispatchers.IO) {
             try {
                 if (isCommand) {
-                    // Protocol requires leading TAB (ASCII 9) to trigger CMD logic
-                    outputStream?.write(9) 
+                    outputStream?.write(9) // TAB
                 }
                 outputStream?.write((text + "\n").toByteArray())
                 outputStream?.flush()
@@ -115,8 +111,9 @@ fun EQBCClientApp() {
         }
         val cleanInput = inputText.trim()
         when (prefix) {
-            "/bct" -> sendPacket("TELL $cleanInput", true)
-            "/bca", "/bcaa" -> sendPacket("MSGALL $cleanInput", true)
+            "/bct" -> sendPacket("bct $cleanInput", true)
+            "/bca" -> sendPacket("bca $cleanInput", true)
+            "/bcaa" -> sendPacket("bcaa $cleanInput", true)
             else -> sendPacket(cleanInput, false)
         }
         inputText = ""
@@ -171,7 +168,6 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 1: Fixed Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -185,7 +181,6 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 2: Prepopulated Grey Hotkeys
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
@@ -198,12 +193,8 @@ fun EQBCClientApp() {
                                         val p = hk.split(" ")
                                         if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                                     } else if (hk.contains("/bc")) {
-                                        // Auto-format hotkey to protocol
-                                        val cmd = hk.replace("/bct ", "TELL ")
-                                                   .replace("/bca ", "MSGALL ")
-                                                   .replace("/bcaa ", "MSGALL ")
-                                                   .removePrefix("/")
-                                        sendPacket(cmd, true)
+                                        // Send as shorthand token bca/bct/bcaa with a TAB
+                                        sendPacket(hk.removePrefix("/"), true)
                                     } else {
                                         sendPacket(hk, false)
                                     }
