@@ -1,3 +1,5 @@
+package com.example.eqbc
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,7 +20,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            EQBCClientApp()
+            MaterialTheme {
+                EQBCClientApp()
+            }
         }
     }
 }
@@ -31,7 +35,6 @@ fun EQBCClientApp() {
     var writer: PrintWriter? by remember { mutableStateOf(null) }
     val scope = rememberCoroutineScope()
 
-    // Configurable Hotkeys (Row 2)
     val hotkeys = remember { mutableStateListOf("/bct MyHealer //cast 1", "/bcaa //sit", "/bcaa //stand") }
 
     fun connectToServer(ip: String, port: Int, name: String) {
@@ -41,8 +44,6 @@ fun EQBCClientApp() {
                 socket = s
                 val out = PrintWriter(s.getOutputStream(), true)
                 writer = out
-                
-                // EQBC Handshake: LOGIN=ToonName;
                 out.print("LOGIN=$name;\n")
                 out.flush()
 
@@ -68,7 +69,6 @@ fun EQBCClientApp() {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // 1. Output Window (Top)
         Text("EQBC Server Output", style = MaterialTheme.typography.labelSmall)
         Surface(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -84,25 +84,22 @@ fun EQBCClientApp() {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 2. Row 1: Fixed Commands
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Button(onClick = { sendCommand("/bct ") }) { Text("/bct") }
             Button(onClick = { sendCommand("/bca ") }) { Text("/bca") }
             Button(onClick = { sendCommand("/bcaa ") }) { Text("/bcaa") }
         }
 
-        // 3. Row 2: Configurable Hotkeys
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             hotkeys.forEach { hk ->
                 Button(onClick = { sendCommand(hk) }) {
-                    Text(hk.take(8) + "...") // Shortened label
+                    Text(hk.take(5) + "...") 
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 4. Input Line (Bottom)
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             TextField(
                 value = inputText,
@@ -112,9 +109,10 @@ fun EQBCClientApp() {
             )
             IconButton(onClick = {
                 if (inputText.startsWith("connect")) {
-                    // Logic for "connect 192.168.1.5 2112 MyToon"
                     val parts = inputText.split(" ")
-                    connectToServer(parts[1], parts[2].toInt(), parts[3])
+                    if (parts.size >= 4) {
+                        connectToServer(parts[1], parts[2].toInt(), parts[3])
+                    }
                 } else {
                     sendCommand(inputText)
                 }
