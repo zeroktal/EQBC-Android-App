@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.io.OutputStream
+import java.io.PrintWriter
 import java.net.Socket
 
 class MainActivity : ComponentActivity() {
@@ -49,17 +49,17 @@ fun EQBCClientApp() {
     
     var messages by remember { mutableStateOf(listOf<String>()) }
     var inputText by remember { mutableStateOf("") }
-    var socket by remember { mutableStateOf<Socket?>(null) }
-    var outputStream by remember { mutableStateOf<OutputStream?>(null) }
+    var writer by remember { mutableStateOf<PrintWriter?>(null) }
     var isConnected by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    // Prepopulated Hotkeys per request
     val hotkeys = remember {
-        val saved = sharedPrefs.getString("HOTKEYS", "/bcaa //sit|/bcaa //stand|/bcaa //follow")
-        saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("/bcaa //sit", "/bcaa //stand", "/bcaa //follow")
+        val saved = sharedPrefs.getString("HOTKEYS", "connect 192.168.1.3 2112 bob|/bca //stand|/bcaa //follow")
+        saved?.split("|")?.toMutableStateList() ?: mutableStateListOf("connect 192.168.1.3 2112 bob", "/bca //stand", "/bcaa //follow")
     }
 
     var showEditDialog by remember { mutableStateOf(false) }
@@ -76,10 +76,10 @@ fun EQBCClientApp() {
         scope.launch(Dispatchers.IO) {
             try {
                 val s = Socket(ip, port)
-                socket = s
-                outputStream = s.getOutputStream()
-                outputStream?.write("LOGIN=$name;\n".toByteArray())
-                outputStream?.flush()
+                val out = PrintWriter(s.getOutputStream(), true)
+                writer = out
+                out.print("LOGIN=$name;\n")
+                out.flush()
                 
                 isConnected = true
                 val reader = BufferedReader(InputStreamReader(s.getInputStream()))
@@ -98,22 +98,10 @@ fun EQBCClientApp() {
         }
     }
 
-    fun sendChat(text: String) {
+    fun sendRaw(text: String) {
         scope.launch(Dispatchers.IO) {
-            try {
-                outputStream?.write((text + "\n").toByteArray())
-                outputStream?.flush()
-            } catch (e: Exception) { }
-        }
-    }
-
-    fun sendProtocolCommand(command: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                outputStream?.write(9) // ASCII Tab
-                outputStream?.write((command + "\n").toByteArray())
-                outputStream?.flush()
-            } catch (e: Exception) { }
+            writer?.println(text)
+            writer?.flush()
         }
     }
 
@@ -122,12 +110,8 @@ fun EQBCClientApp() {
             inputText = "$prefix "
             return
         }
-        val cleanInput = inputText.trim()
-        when (prefix) {
-            "/bct" -> sendProtocolCommand("TELL $cleanInput")
-            "/bca", "/bcaa" -> sendProtocolCommand("MSGALL $cleanInput")
-            else -> sendChat(cleanInput)
-        }
+        val combined = "$prefix ${inputText.trim()}"
+        sendRaw(combined)
         inputText = ""
     }
 
@@ -153,18 +137,12 @@ fun EQBCClientApp() {
                                 val savedIp = sharedPrefs.getString("LAST_IP", "") ?: ""
                                 val savedPort = sharedPrefs.getInt("LAST_PORT", 2112)
                                 val savedName = sharedPrefs.getString("LAST_NAME", "bob") ?: "bob"
-                                
-                                if (savedIp.isNotEmpty()) {
-                                    connectToServer(savedIp, savedPort, savedName)
-                                }
+                                if (savedIp.isNotEmpty()) connectToServer(savedIp, savedPort, savedName)
                             }
                         )
                         DropdownMenuItem(
                             text = { Text("Clear Output") },
-                            onClick = { 
-                                menuExpanded = false
-                                messages = emptyList() 
-                            }
+                            onClick = { menuExpanded = false; messages = emptyList() }
                         )
                     }
                 }
@@ -186,6 +164,7 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 1: Fixed Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("/bct", "/bca", "/bcaa").forEach { label ->
                     Button(
@@ -199,22 +178,20 @@ fun EQBCClientApp() {
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // Row 2: Grey Hotkeys (Prepopulated)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 hotkeys.forEachIndexed { index, hk ->
                     Box(
                         modifier = Modifier
                             .weight(1f).height(36.dp)
-                            .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
+                            .background(Color.Gray, RoundedCornerShape(4.dp))
                             .combinedClickable(
                                 onClick = { 
-                                    if (hk.contains("/bc")) {
-                                        val cmd = hk.replace("/bct ", "TELL ")
-                                                   .replace("/bca ", "MSGALL ")
-                                                   .replace("/bcaa ", "MSGALL ")
-                                                   .removePrefix("/")
-                                        sendProtocolCommand(cmd) 
+                                    if (hk.startsWith("connect")) {
+                                        val p = hk.split(" ")
+                                        if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                                     } else {
-                                        sendChat(hk)
+                                        sendRaw(hk)
                                     }
                                 },
                                 onLongClick = {
@@ -225,7 +202,7 @@ fun EQBCClientApp() {
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = if(hk.length > 8) hk.take(8) + ".." else hk, color = Color.White, fontSize = 10.sp)
+                        Text(text = if(hk.length > 10) hk.take(10) + ".." else hk, color = Color.White, fontSize = 10.sp)
                     }
                 }
             }
@@ -247,7 +224,7 @@ fun EQBCClientApp() {
                             val p = inputText.split(" ")
                             if (p.size >= 4) connectToServer(p[1], p[2].toInt(), p[3])
                         } else {
-                            sendChat(inputText)
+                            sendRaw(inputText)
                         }
                         inputText = ""
                     },
