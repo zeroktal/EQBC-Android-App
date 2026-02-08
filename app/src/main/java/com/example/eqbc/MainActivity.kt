@@ -104,16 +104,30 @@ fun EQBCClientApp() {
     }
 
     // Fixed smartSend: Uses standard slashes and space separation
-    fun smartSend(prefix: String) {
+fun smartSend(type: String) {
         if (inputText.isBlank()) {
-            // If box is empty, just put the command in the box for the user
-            inputText = "$prefix "
+            inputText = "$type "
             return
         }
         
-        // If box has text, combine and send immediately
-        val combined = "$prefix $inputText".trim()
-        sendRaw(combined)
+        // We trim and split the input to separate the Target Name from the Command
+        val parts = inputText.trim().split(" ", limit = 2)
+        
+        val finalPacket = when (type) {
+            "/bct" -> {
+                // If the user typed "ToonName //command"
+                if (parts.size == 2) {
+                    "\tTELL ${parts[0]} ${parts[1]}"
+                } else {
+                    "\tTELL $inputText"
+                }
+            }
+            "/bca" -> "\tMSGALL $inputText"
+            "/bcaa" -> "\tMSGALL $inputText" // Server handles 'all' via MSGALL
+            else -> inputText
+        }
+        
+        sendRaw(finalPacket)
         inputText = "" 
     }
 
